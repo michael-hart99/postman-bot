@@ -1,12 +1,14 @@
 {
-  "name": "discord",
+  "name": "postman-bot",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "build/startPostmanBot.js",
   "scripts": {
+    "start": "node build/startPostmanBot.js",
+    "build": "tsc -p ./config/tsconfig.json",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
+  "author": "michael-hart99@github",
   "license": "ISC",
   "dependencies": {
     "@types/node": "^14.14.10",
@@ -16,6 +18,6 @@
     "dynamodb": "^1.3.0",
     "joi": "^17.3.0",
     "tslint": "^5.12.1",
-    "typescript": "^3.3.3"
+    "typescript": "^4.1.2"
   }
 }

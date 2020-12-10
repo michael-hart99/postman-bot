@@ -1,10 +1,11 @@
-import { Guild, Message } from "discord.js";
+import { DMChannel, Guild, Message, NewsChannel, TextChannel } from "discord.js";
+import { UserTable, GuildTable } from "./tables";
 
 const Discord = require('discord.js');
 const dynamo = require('dynamodb');
 
-const { tables } = require('./dynamo');
-const { TOKEN } = require('./token');
+const {  } = require('./tables');
+const { TOKEN, INVITE_LINK } = require('./token');
 
 dynamo.AWS.config.loadFromPath('./credentials.json');
 
@@ -15,46 +16,121 @@ client.once('ready', () => {
 });
 
 function test(_: string, fullResponse: Message) {
-    console.log('Updated your profile.');
-    tables.User.update({
-        key: 'user#' + fullResponse.author.id,
-        discord_id: fullResponse.author.id,
-        username: fullResponse.author.username,
-        discriminator: fullResponse.author.discriminator,
-        address: {
-            line1: '',
-            line2: '',
-            line3: '',
-            country: '',
-        },
+    sendMessage(fullResponse.channel, '', 'Done.');
+    GuildTable.update({
+        'key': `guild#${783156031085215744}`,
+        'active_users': {},
+    });
+    /*
+    Metadata.update({
+        key: 'metadata',
+        active_guilds: { }
+    });
+    */
+}
+
+function info(_: string, fullResponse: Message) {
+    UserTable.get(`user#${fullResponse.author.id}`, (item) => {
+        sendMessage(fullResponse.channel, '', JSON.stringify(item));
     });
 }
+function viewAddress(_: string, fullResponse: Message) {
+    UserTable.get(`user#${fullResponse.author.id}`, (item) => {
+        if (item === null) {
+            UserTable.update({
+                key: `user#${fullResponse.author.id}`,
+                discord_id: fullResponse.author.id,
+                username: fullResponse.author.username,
+                discriminator: fullResponse.author.discriminator,
+                address: {
+                    line1: '',
+                    line2: '',
+                    line3: '',
+                    line4: '',
+                },
+            });
+            sendMessage(fullResponse.channel, '', 'Looks like you haven\'t set an address yet');
+        } else if (
+            item['address']['line1'] === '' &&
+            item['address']['line2'] === '' &&
+            item['address']['line3'] === '' &&
+            item['address']['line4'] === ''
+        ) {
+            sendMessage(fullResponse.channel, '', 'Looks like you haven\'t set an address yet');
+        } else {
+            sendMessage(
+                fullResponse.channel,
+                '',
+                [
+                    item['address']['line1'],
+                    item['address']['line2'],
+                    item['address']['line3'],
+                    item['address']['line4'],
+                ].join('\n')
+            );
+        }
+    });
+}
+
+function setAddress(args: string, fullResponse: Message) {
+    function formatAddress(s: string) {
+        return s.trim().toUpperCase();
+    }
+    let lines = args.split('\n');
+    if (lines.length !== 4) {
+        sendMessage(fullResponse.channel, '', `bad args: "${args}"`);
+    } else {
+        lines = lines.map(formatAddress);
+        UserTable.update({
+            key: `user#${fullResponse.author.id}`,
+            discord_id: fullResponse.author.id,
+            username: fullResponse.author.username,
+            discriminator: fullResponse.author.discriminator,
+            address: {
+                line1: lines[0],
+                line2: lines[1],
+                line3: lines[2],
+                line4: lines[3],
+            },
+        });
+        sendMessage(fullResponse.channel, 'Updated successfully', lines.join('\n'));
+    }
+}
+
+function joinServer(args: string, fullResponse: Message) {
+    const guild_id = parseInt(args);
+    if (isNaN(guild_id)) {
+        sendMessage(fullResponse.channel, '', `bad args: "${args}"`);
+    } else {
+        GuildTable.get(`guild#${guild_id}`, item => {
+            if (item === null) {
+                sendMessage(fullResponse.channel, '', `Looks like that server hasn\'t invited me. Have someone invite me using this link: ${INVITE_LINK}`);
+            } else {
+                const active_users = item['active_users'];
+                if (active_users[fullResponse.author.id] !== undefined) {
+                    sendMessage(fullResponse.channel, '', 'You seem to already be a part of this server\'s postcard list');
+                } else {
+                    active_users[fullResponse.author.id] = true;
+                    GuildTable.update({
+                        'key': `guild#${guild_id}`,
+                        'active_users': active_users,
+                    });
+                    sendMessage(fullResponse.channel, 'Updated successfully', 'You have been added to that server\'s postcard list');
+                }
+            }
+        });
+    }
+}
+
+function leaveServer(args: string, fullResponse: Message) {
+    args;
+    fullResponse;
+}
+
 function cmdNotFound(cmd: string, fullResponse: Message) {
-    fullResponse.channel.send('I don\'t know how to do "' + cmd + '".');
+    sendMessage(fullResponse.channel, '', 'I don\'t know how to do "' + cmd + '".');
 }
 
-/*
-function joinServer(args: string) {
-
-    tables.User.update({
-        key: 'user#12345',
-        guilds: ['111'],
-        discord_id: '12345',
-        username: 'mr_test',
-        discriminator: '3232',
-        address: {
-            line1: 'MR. TEST',
-            line2: '223 TEST WAY SE',
-            line3: 'SEATTLE, WA 99900',
-            country: 'United STATES',
-        },
-    }, console.log);
-}
-
-function leaveServer(args: string) {
-
-}
-//*/
 const PREFIX = 'postman!';
 const NOT_CMD = '[[NOT_COMMAND]]';
 
@@ -62,14 +138,38 @@ class Command {
     constructor(
         public fn: (arg: string, fullResponse: Message) => void,
         public desc: string,
+        public restricted: boolean,
     ) { }
 }
-const dmCommands = new Map<string, Command>();
-dmCommands.set('test', new Command(test, 'A test command.'));
+const dmCommands = new Map<string, Command>([
+    ['test', new Command(test, 'A test command', false)],
+    ['info', new Command(info, 'View your user info', false)],
+    //['help', new Command(help, '', false)],
+    ['viewaddress', new Command(viewAddress, 'View your saved address', false)],
+    ['setaddress', new Command(setAddress, 'Set/change your saved address', false)],
+    //['sendmail', new Command(_, '', false)],
+    //['undosendmail', new Command(_, '', false)],
+    ['joinserver', new Command(joinServer, 'Join a server\'s postcard list', false)],
+    ['leaveserver', new Command(leaveServer, 'Leave a server\'s postcard list', false)],
+    //['deletealldata', new Command(_, '', false)],
+    //['togglereminder', new Command(_, '', true)],
+    //['startnewround', new Command(_, '', true)],
+    //['authorize', new Command(_, '', true)],
+    //['unauthorize', new Command(_, '', true)],
+    //['changechannel', new Command(_, '', true)],
+]);
     //'join': joinServer,
     //'leave': leaveServer,
 
-//const BOT_INVITE_LINK = 'https://discord.com/oauth2/authorize?client_id=783139009374322759&scope=bot';
+function sendMessage(channel: TextChannel | NewsChannel | DMChannel, title: string, content: string) {
+    channel.send({
+        embed: {
+            title: title,
+            description: content,
+        },
+    });
+}
+
 function parseMessage(content: string) {
     content = content.trim();
 
@@ -96,23 +196,27 @@ function parseMessage(content: string) {
 
 // message sent by user
 client.on('message', (msg: Message) => {
-    console.log();
     if (!msg.author.bot && msg.webhookID === null) {
         const request = parseMessage(msg.content.toLowerCase());
         if (request.command !== NOT_CMD) {
-            if (msg.channel.type === 'text') {
+            if (msg.channel.type === 'text' || "news") {
                 // if in group_channel...
-            } else if (msg.channel.type === 'dm') {
                 const cmd = dmCommands.get(request.command);
                 if (cmd === undefined) {
                     cmdNotFound(request.command, msg);
                 } else {
                     cmd.fn(request.args, msg);
                 }
-                // authorized?
-                // dont allow '#' in some fields?
+            } else if (msg.channel.type === 'dm') {
+                // if in dm...
+                const cmd = dmCommands.get(request.command);
+                if (cmd === undefined) {
+                    cmdNotFound(request.command, msg);
+                } else {
+                    cmd.fn(request.args, msg);
+                }
             } else {
-
+                // UNK?
             }
         }
     }
