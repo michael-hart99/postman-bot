@@ -39,9 +39,21 @@ export class PostmanTable<T extends Item> {
         });
     }
 
-    public update(values: Object) {
+    public update(values: Object, callback?: () => void) {
         this.table.update(values, (err, _) => {
             handleErr(err);
+            if (callback) {
+                callback();
+            }
+        });
+    }
+
+    public delete(key: string, callback?: () => void) {
+        this.table.destroy(key, (err, _) => {
+            handleErr(err);
+            if (callback) {
+                callback();
+            }
         });
     }
 }
@@ -84,7 +96,6 @@ export const GuildTable = new PostmanTable<GuildItem>('Guild', {
         true,
     ),
     history_length: Joi.number(),
-    round_end: Joi.date().iso(),
     group_channel: Joi.number(),
     quick_cmd: Joi.string(),
 });

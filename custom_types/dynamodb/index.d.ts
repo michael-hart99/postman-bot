@@ -1,7 +1,8 @@
 declare module 'dynamodb' {
     class DynamoDbTable<T extends Item> {
         get(key: string, callback: (err, res) => void);
-        update(values: Object, callback: (err, res) => void);
+        update(values: Object, callback?: (err, res) => void);
+        destroy(key: string, callback?: (err, res) => void);
     }
 
     class ItemRes<T extends Item> {
@@ -37,13 +38,12 @@ declare module 'dynamodb' {
     class GuildItem extends Item {
         'guild': string
         'authorized_users': {
-            [key:string]: boolean,
+            [key:string]: string,
         }
         'active_users': {
-            [key:string]: boolean,
+            [key:string]: string,
         }
         'history_length': string
-        'round_end': string
         'group_channel': string
         'quick_cmd': string
     }
