@@ -63,6 +63,7 @@ export const UserTable = new PostmanTable<UserItem>('User', {
     discord_id: Joi.number(),
     username: Joi.string(),
     discriminator: Joi.number(),
+    server: Joi.string().pattern(/^([0-9]+|multiple)$/),
     address: Joi.object().keys({
         line1: Joi.string(),
         line2: Joi.string(),
@@ -72,7 +73,7 @@ export const UserTable = new PostmanTable<UserItem>('User', {
     quick_cmd: Joi.string(),
 });
 export const HistoryTable = new PostmanTable<HistoryItem>('History', {
-    key: Joi.string().pattern(/^(guild#[0-9]+#([0-9]+|current|previous))$/),
+    key: Joi.string().pattern(/^(guild#[0-9]+#([0-9]+|current))$/),
     guild: Joi.number(),
     round_id: Joi.number(),
     date: Joi.date().iso(),

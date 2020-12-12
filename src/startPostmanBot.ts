@@ -1,5 +1,6 @@
-import { DMChannel, Guild, Message, NewsChannel, TextChannel, User } from "discord.js";
-import { UserTable, GuildTable, MetadataTable } from "./tables";
+import { DMChannel, Guild, GuildChannel, GuildMember, Message, NewsChannel, TextChannel, User } from "discord.js";
+import { GuildItem } from "dynamodb";
+import { UserTable, GuildTable, MetadataTable, HistoryTable } from "./tables";
 
 const Discord = require('discord.js');
 const dynamo = require('dynamodb');
@@ -8,6 +9,18 @@ const {  } = require('./tables');
 const { TOKEN, INVITE_LINK } = require('./token');
 
 dynamo.AWS.config.loadFromPath('./credentials.json');
+
+/**
+ * Shuffles array in place. ES6 version
+ * @param {Array} a items An array containing the items.
+ */
+function shuffle(a) {
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+}
 
 const client = new Discord.Client();
 
@@ -25,14 +38,9 @@ class CommandTemplate {
 
 function test(_: string, fullResponse: Message) {
     sendMessage(fullResponse.channel, '', 'Done.');
-    GuildTable.update({
-        'key': `guild#783156031085215744`,
-        'active_users': {},
-    });
-    MetadataTable.update({
-        key: 'metadata',
-        active_guilds: {'783156031085215744': 'true'}
-    });
+    client.guilds.fetch({ guild_id: '783156031085215744', force: true }).then((res: Guild) => {
+        res.members.fetch({ user: '614746191829270549', force: true }).then(console.log);
+    }).catch(console.log);
 }
 function handleError(channel: TextChannel | NewsChannel | DMChannel, err: string) {
     console.log(`Error: ${err}`);
@@ -108,6 +116,71 @@ function setAddress(args: string, fullResponse: Message) {
         });
         sendMessage(fullResponse.channel, 'Updated successfully', lines.join('\n'));
     }
+}
+
+function viewAssigneeHelper(guild_id: string, fullResponse: Message) {
+    HistoryTable.get(`history#${guild_id}#current`, history_item => {
+        if (history_item === null) {
+            sendMessage(fullResponse.channel, '', 'Looks like there is no ongoing round');
+        } else {
+            if (history_item['matches'][fullResponse.author.id]) {
+                client.guilds.fetch({ guild_id, force: true }).then((guild: Guild) => {
+                    UserTable.get(`user#${history_item['matches'][fullResponse.author.id]['recipient']}`, user_item => {
+                        if (user_item === null) {
+                            handleError(fullResponse.channel, `not able to find user ${history_item['matches'][fullResponse.author.id]['recipient']} when getting assignee`);
+                        } else {
+                            guild.members.fetch({ user: user_item['discord_id'], force: true }).then((member: GuildMember) => {
+                                let name: string;
+                                if (member.nickname === null) {
+                                    name = `${member.user.username}#${member.user.discriminator}`;
+                                } else {
+                                    name = member.nickname;
+                                }
+                                sendMessage(
+                                    fullResponse.author,
+                                    `Shhhh, don't tell anyone!`,
+                                    [
+                                        `@${name}`,
+                                        '',
+                                        user_item['address']['line1'],
+                                        user_item['address']['line2'],
+                                        user_item['address']['line3'],
+                                        user_item['address']['line4'],
+                                    ].join('\n'),
+                                );
+                            }).catch(() => handleError(fullResponse.channel, `Something went wrong when looking for user ${user_item['discord_id']} in guild ${guild_id}`));
+                        }
+                    });
+                }).catch(() => handleError(fullResponse.channel, `unable to find guild ${guild_id}`));
+            } else {
+                sendMessage(fullResponse.channel, '', 'Looks like you are not in the current round');
+            }
+        }
+    });
+}
+
+function viewAssignee(args: string, fullResponse: Message) {
+    const argArray = args.split(' ').filter((s) => s.match(/^([0-9]+)$/) !== null);
+    if (argArray.length === 1) {
+        const guild_id = argArray[0];
+        viewAssigneeHelper(guild_id, fullResponse);
+    } else {
+        UserTable.get(`user#${fullResponse.author.id}`, author_item => {
+            if (author_item !== null && author_item['server'] !== 'multiple') {
+                viewAssigneeHelper(author_item['server'], fullResponse);
+            } else {
+                sendMessage(fullResponse.channel, '', 'You\'re in multiple postman servers. Make sure your command follows \'postman!viewassignee <server id>\'');
+            }
+        });
+    }
+}
+
+function sendMail(args: string, fullResponse: Message) {
+
+}
+
+function undoSendMail(args: string, fullResponse: Message) {
+
 }
 
 function joinServer(args: string, fullResponse: Message) {
@@ -199,6 +272,167 @@ function deleteAllData(_: string, fullResponse: Message) {
     sendMessage(fullResponse.channel, 'Updated successfully', 'Your information has been deleted');
 }
 
+async function getActiveUsers(guild: Guild, item: GuildItem) {
+    const users: string[] = [];
+    for (const user of Object.keys(item['active_users'])) {
+        await guild.members.fetch({ user, force: true }).then((res: GuildMember) => {
+            if (res.nickname === null) {
+                users.push(`${res.user.username}#${res.user.discriminator}`);
+            } else {
+                users.push(res.nickname);
+            }
+        }).catch(() => console.log);
+    }
+    return users;
+}
+
+function listUsers(args: string, fullResponse: Message) {
+    const argArray = args.split(' ').filter((s) => s.match(/^([0-9]+)$/) !== null);
+    if (argArray.length === 1) {
+        const guild_id = argArray[0];
+        GuildTable.get(`guild#${guild_id}`, item => {
+            if (item === null) {
+                sendMessage(fullResponse.channel, '', `I couldn\'t find a matching server with ID ${guild_id}, double-check that the second number is the server ID`);
+            } else {
+                const authorized_users = item['authorized_users'];
+                if (authorized_users[fullResponse.author.id]) {
+                    client.guilds.fetch({ guild_id, force: true }).then((guild: Guild) => {
+                        getActiveUsers(guild, item).then((users: string[]) => {
+                            sendMessage(fullResponse.channel, 'Member list', users.join('\n'));
+                        });
+                    }).catch(() => handleError(fullResponse.channel, 'Unable to find guild although it exists in database'));
+                } else {
+                    sendMessage(fullResponse.channel, '', 'You aren\'t authorized to do this');
+                }
+            }
+        });
+    } else {
+        sendMessage(fullResponse.channel, '', 'Make sure your command follows \'postman!listusers <server id>\'');
+    }
+}
+
+function getPairing(n: number, previous: number[], fullResponse: Message) {
+    if (n <= 2) {
+        handleError(fullResponse.channel, 'Too small of group. Only ${n}');
+    } else {
+        const recipients = [...Array(n).keys()];
+
+        let filteredList = [];
+        while (filteredList.length < n) {
+            shuffle(recipients);
+
+            filteredList = recipients.filter((v, i) => v !== i && v !== previous[i]);
+        }
+        return recipients;
+    }
+}
+
+function startNewRound(args: string, fullResponse: Message) {
+    const argArray = args.split(' ').filter((s) => s.match(/^([0-9]+)$/) !== null);
+    if (argArray.length === 1) {
+        const guild_id = argArray[0];
+        GuildTable.get(`guild#${guild_id}`, guild_item => {
+            if (guild_item === null) {
+                sendMessage(fullResponse.channel, '', `I couldn\'t find a matching server with ID ${guild_id}, double-check that the second number is the server ID`);
+            } else {
+                if (guild_item['authorized_users'][fullResponse.author.id]) {
+                    const active_users = Object.keys(guild_item['active_users']);
+                    if (active_users.length < 3) {
+                        sendMessage(fullResponse.channel, '', `Not enough active users. Only ${active_users.length}, and there must be 3 or more. Check who is active with \`postman!listusers\` and have people join the round with \`postman!join server ${guild_id}\``);
+                    } else {
+                        client.guilds.fetch({ guild_id, force: true }).then((guild: Guild) => {
+                            // @ts-ignore. Casting GuildChannel to TextChannel bc no one will use voice channel unless they want to kill the postman.
+                            const channel: TextChannel = guild.channels.resolve(guild_item['group_channel']);
+                            if(channel === null) {
+                                sendMessage(fullResponse.channel, '', 'Wasn\'t able to find that channel');
+                            } else {
+                                HistoryTable.get(`history#${guild_id}#current`, history_item => {
+                                    const previous = new Array(active_users.length).fill(-1);
+                                    if (history_item !== null) {
+                                        for (let i = 0; i < active_users.length; ++i) {
+                                            if (history_item['matches'][active_users[i]]) {
+                                                previous[i] = active_users.indexOf(history_item['matches'][active_users[i]]['recipient']);
+                                            }
+                                        }
+                                    }
+                                    const pairing = getPairing(active_users.length, previous, fullResponse);
+                                    const matches: { [key: string]: { recipient: string; sent: string; } } = {};
+                                    for (let i = 0; i < active_users.length; ++i) {
+                                        matches[active_users[i]] = {
+                                            'recipient': active_users[pairing[i]],
+                                            'sent': 'false',
+                                        };
+                                    }
+                                    const date = new Date().toISOString();
+                                    const round_num = parseInt(guild_item['history_length']) + 1;
+                                    GuildTable.update({
+                                        'key': `guild#${guild_id}`,
+                                        'history_length': round_num.toString(),
+                                    })
+                                    HistoryTable.update({
+                                        'key': `history#${guild_id}#current`,
+                                        'guild': guild_id,
+                                        'round_id': round_num.toString(),
+                                        'date': date,
+                                        'matches': matches,
+                                    })
+                                    HistoryTable.update({
+                                        'key': `history#${guild_id}#${round_num.toString()}`,
+                                        'guild': guild_id,
+                                        'round_id': round_num.toString(),
+                                        'date': date,
+                                        'matches': matches,
+                                    })
+                                    for (const user_id of active_users) {
+                                        UserTable.get(`user#${user_id}`, user_item => {
+                                            if (user_item === null) {
+                                                handleError(fullResponse.channel, `not able to find user ${user_id} when starting round`);
+                                            } else {
+                                                guild.members.fetch({ user: user_id, force: true }).then((member: GuildMember) => {
+                                                    let name: string;
+                                                    if (member.nickname === null) {
+                                                        name = `${member.user.username}#${member.user.discriminator}`;
+                                                    } else {
+                                                        name = member.nickname;
+                                                    }
+                                                    sendMessage(
+                                                        guild.member(user_id),
+                                                        `Shhhh, don't tell anyone!`,
+                                                        [
+                                                            `@${name}`,
+                                                            '',
+                                                            user_item['address']['line1'],
+                                                            user_item['address']['line2'],
+                                                            user_item['address']['line3'],
+                                                            user_item['address']['line4'],
+                                                        ].join('\n'),
+                                                    );
+                                                }).catch(() => handleError(fullResponse.channel, `Something went wrong when looking for user ${user_id} in guild ${guild_id}`));
+                                            }
+                                        });
+                                    }
+                                    sendMessage(
+                                        channel,
+                                        `Postcard Somebody Round ${round_num + 1} has begun!`,
+                                        [
+                                            `I've just sent you a DM with your assigned person's address. Keep it secret and have some fun!`,
+                                            '',
+                                            'If you did not get a message, post here or let Michael know ASAP',
+                                        ].join('\n'));
+                                });
+                            }
+                        }).catch(() => handleError(fullResponse.channel, 'Wasn\'t able to find that server'));
+                    }
+                } else {
+                    sendMessage(fullResponse.channel, '', 'You aren\'t authorized to do this');
+                }
+            }
+        });
+    } else {
+        sendMessage(fullResponse.channel, '', 'Make sure your command follows \'postman!listusers <server id>\'');
+    }
+}
+
 function authorize(args: string, fullResponse: Message) {
     const argArray = args.split(' ').filter((s) => s.match(/^([0-9]+)$/) !== null);
     if (argArray.length === 2) {
@@ -214,7 +448,7 @@ function authorize(args: string, fullResponse: Message) {
                         authorized_users[new_user_id] = 'true';
                         GuildTable.update({
                             'key': `guild#${guild_id}`,
-                            'active_users': authorized_users,
+                            'authorized_users': authorized_users,
                         });
                         sendMessage(fullResponse.channel, 'Updated successfully', 'That user is now authorized');
                     } else {
@@ -242,10 +476,10 @@ function unauthorize (args: string, fullResponse: Message) {
                 const authorized_users = item['authorized_users'];
                 if (authorized_users[fullResponse.author.id]) {
                     if (authorized_users[new_user_id]) {
-                        authorized_users[new_user_id] = 'false';
+                        delete authorized_users[new_user_id];
                         GuildTable.update({
                             'key': `guild#${guild_id}`,
-                            'active_users': authorized_users,
+                            'authorized_users': authorized_users,
                         });
                         sendMessage(fullResponse.channel, 'Updated successfully', 'That user is now unauthorized');
                     } else {
@@ -262,9 +496,34 @@ function unauthorize (args: string, fullResponse: Message) {
 }
 
 function changeChannel(args: string, fullResponse: Message) {
-    client.channels.fetch('222109930545610754');
-    args;
-    fullResponse;
+    const argArray = args.split(' ').filter((s) => s.match(/^([0-9]+)$/) !== null);
+    if (argArray.length === 2) {
+        const channel_id = argArray[0];
+        const guild_id = argArray[1];
+        GuildTable.get(`guild#${guild_id}`, item => {
+            if (item === null) {
+                sendMessage(fullResponse.channel, '', `I couldn\'t find a matching server with ID ${guild_id}, double-check that the second number is the server ID`);
+            } else {
+                if (item['authorized_users'][fullResponse.author.id]) {
+                    client.guilds.fetch({ guild_id, force: true }).then((res: Guild) => {
+                        if(res.channels.resolve(channel_id) === null) {
+                            sendMessage(fullResponse.channel, '', 'Wasn\'t able to find that channel');
+                        } else {
+                            GuildTable.update({
+                                'key': `guild#${guild_id}`,
+                                'group_channel': channel_id,
+                            });
+                            sendMessage(fullResponse.channel, 'Updated successfully', 'Changed postcard announcement channel');
+                        }
+                    }).catch(() => handleError(fullResponse.channel, 'Wasn\'t able to find that server'));
+                } else {
+                    sendMessage(fullResponse.channel, '', 'You aren\'t authorized to do this');
+                }
+            }
+        });
+    } else {
+        sendMessage(fullResponse.channel, '', 'Make sure your command follows \'postman!changechannel <channel id> <server id>\'');
+    }
 }
 
 function cmdNotFound(cmd: string, fullResponse: Message) {
@@ -273,22 +532,24 @@ function cmdNotFound(cmd: string, fullResponse: Message) {
 
 const channelCommands = new Map<string, CommandTemplate>();
 const dmCommands = new Map<string, CommandTemplate>();
-dmCommands.set('test', new CommandTemplate(test, 'A test command', true));
-dmCommands.set('info', new CommandTemplate(info, 'View your user info', true));
-dmCommands.set('help', new CommandTemplate(help(dmCommands), 'Displays list of available commands', false));
-dmCommands.set('viewaddress', new CommandTemplate(viewAddress, 'View your saved address', false));
-dmCommands.set('setaddress', new CommandTemplate(setAddress, 'Set/change your saved address', false));
-//dmCommands.set('sendmail', new CommandTemplate(_, '', false));
-//dmCommands.set('undosendmail', new CommandTemplate(_, '', false));
-dmCommands.set('joinserver', new CommandTemplate(joinServer, 'Join a server\'s postcard list', false));
-dmCommands.set('leaveserver', new CommandTemplate(leaveServer, 'Leave a server\'s postcard list', false));
-dmCommands.set('deletealldata', new CommandTemplate(deleteAllData, 'Delete all stored data about you', false));
-//dmCommands.set('startnewround', new CommandTemplate(_, '', true));
-dmCommands.set('authorize', new CommandTemplate(authorize, 'Give someone admin postcard privileges in a server', true));
-dmCommands.set('unauthorize', new CommandTemplate(unauthorize, 'Remove someone\'s admin postcard privileges in a server', true));
-dmCommands.set('changechannel', new CommandTemplate(changeChannel, 'Changes the channel where postcard announcements are sent', true));
+dmCommands.set('test', new CommandTemplate(test, 'A test command.', true));
+dmCommands.set('info', new CommandTemplate(info, 'View your user info.', true));
+dmCommands.set('help', new CommandTemplate(help(dmCommands), 'Displays list of available commands.', false));
+dmCommands.set('viewaddress', new CommandTemplate(viewAddress, 'View your saved address.', false));
+dmCommands.set('setaddress', new CommandTemplate(setAddress, 'Set/change your saved address.', false));
+dmCommands.set('viewAssignee', new CommandTemplate(viewAssignee, 'View your current assignee.', false));
+dmCommands.set('sendmail', new CommandTemplate(sendMail, 'Sends an announcement for your assignee to check their mail.', false));
+dmCommands.set('undosendmail', new CommandTemplate(undoSendMail, 'Sends an announcement for your assignee indicating the last message was a mistake.', false));
+dmCommands.set('joinserver', new CommandTemplate(joinServer, 'Join a server\'s postcard list.', false));
+dmCommands.set('leaveserver', new CommandTemplate(leaveServer, 'Leave a server\'s postcard list.', false));
+dmCommands.set('deletealldata', new CommandTemplate(deleteAllData, 'Delete all stored data about you.', false));
+dmCommands.set('listusers', new CommandTemplate(listUsers, 'Lists all active users who have joined in a given channel.', true));
+dmCommands.set('startnewround', new CommandTemplate(startNewRound, 'Starts a new postcard round, assigning everyone a recipient.', true));
+dmCommands.set('authorize', new CommandTemplate(authorize, 'Give someone admin postcard privileges in a server.', true));
+dmCommands.set('unauthorize', new CommandTemplate(unauthorize, 'Remove someone\'s admin postcard privileges in a server.', true));
+dmCommands.set('changechannel', new CommandTemplate(changeChannel, 'Changes the channel where postcard announcements are sent.', true));
 
-function sendMessage(channel: TextChannel | NewsChannel | DMChannel, title: string, content: string) {
+function sendMessage(channel: TextChannel | NewsChannel | DMChannel | User | GuildMember, title: string, content: string) {
     channel.send({
         embed: {
             title: title,
@@ -381,46 +642,69 @@ client.on('message', (msg: Message) => {
             });
         }
     }
-    /*
-    console.log();
-    console.log();
-    console.log(msg.content);
-    console.log(msg.channel.type);
-    console.log(msg.createdTimestamp);
-    console.log(msg.author.bot);
-    console.log(msg.webhookID === null);
-    console.log();
-    console.log('channel_id:'+msg.channel.id);
-    if (msg.channel.type === 'text')
-        console.log('guild_id:'+msg.channel.guild.id);
-    console.log('author:'+msg.author.id);
-    console.log('username:'+msg.author.username);
-    console.log('discriminator:'+msg.author.discriminator);
-    //*/
-    // 
-
 });
+
+const INTRO_MESSAGE = [
+    'You added Postman to a server, and thus you are currently the sole authorized user in that channel.',
+    '',
+    'To view all available commands, run `postman!help showall`',
+    '',
+    'To start a postcard round',
+    '- have a few users join via `postman!joinserver <server id>`',
+    '- have those users set their addresses via `postman!setaddress`',
+    '- set the postcard announcement channel via `postman!changechannel <channel id> <server id>`',
+    '- start the round with `postman!startround`',
+    '',
+    'To authorize a different user, run `postman!authorize <user id> <server id>`'
+].join('\n');
 
 //joined a server
 client.on("guildCreate", (guild: Guild) => {
-    guild.fetchAuditLogs({type: "BOT_ADD", limit: 1}).then(log => { // Fetching 1 entry from the AuditLogs for BOT_ADD.
+    guild.fetchAuditLogs({ type: "BOT_ADD", limit: 1 }).then(log => { // Fetching 1 entry from the AuditLogs for BOT_ADD.
         const first = log.entries.first();
         if (!first) {
-            throw 'hgfghfggh';
+            console.log('Not able to get user for guildCreate trigger');
         } else {
-        const authUser = first.executor;
-        authUser;
+            const authorized_users: {[key: string]: string} = {};
+            authorized_users[first.executor.id] = 'true';
+            GuildTable.update({
+                'key': `guild#${guild.id}`,
+                'guild': guild.id,
+                'authorized_users': authorized_users,
+                'active_users': {},
+                'history_length': '0',
+                'group_channel': '-1',
+                'quick_cmd': '',
+            });
+            const active_guilds: {[key: string]: string} = {};
+            active_guilds[guild.id] = 'true';
+            MetadataTable.update({
+                key: 'metadata',
+                active_guilds: active_guilds,
+            });
+            sendMessage(first.executor, 'Hello!', INTRO_MESSAGE);
         }
     });
     console.log("Joined a new guild: " + guild.name);
-    //Your other stuff like adding to guildArray
 })
 
 //removed from a server
 client.on("guildDelete", (guild: Guild) => {
-    guild.available;
+    GuildTable.delete(`guild#${guild.id}`);
+
+    MetadataTable.get('metadata', item => {
+        if (item === null) {
+            console.log('Metadata entry is missing');
+        } else {
+            const active_guilds = item['active_guilds'];
+            delete active_guilds[guild.id];
+            MetadataTable.update({
+                key: 'metadata',
+                active_guilds: active_guilds,
+            });
+        }
+    });
     console.log("Left a guild: " + guild.name);
-    //remove from guildArray
 })
 
 client.login(TOKEN);
