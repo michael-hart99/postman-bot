@@ -63,7 +63,7 @@ export const UserTable = new PostmanTable<UserItem>('User', {
     discord_id: Joi.number(),
     username: Joi.string(),
     discriminator: Joi.number(),
-    server: Joi.string().pattern(/^([0-9]+|multiple)$/),
+    server: Joi.string().pattern(/^([0-9]+|multiple|none)$/),
     address: Joi.object().keys({
         line1: Joi.string(),
         line2: Joi.string(),

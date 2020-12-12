@@ -22,6 +22,33 @@ function shuffle(a) {
     return a;
 }
 
+const PLACEHOLDER = '{}';
+const PHRASES = [
+  PLACEHOLDER + ' has a letter on the way!',
+  PLACEHOLDER + ' should keep an eye on their mailbox...',
+  'Look out, mail on the way for ' + PLACEHOLDER,
+  'Keep \'em peeled, ' + PLACEHOLDER + ', I\'ve got a letter for you.',
+  'Making my way downtown, walking fast, with a letter for ' + PLACEHOLDER,
+  'Yo, anyone know where ' + PLACEHOLDER + ' lives? Jk, I know. It\'s on this letter I have for them.',
+  'Wish I could go home and see my family but I guess I have to deliver this letter to ' + PLACEHOLDER,
+  'Start checking your mailbox, ' + PLACEHOLDER + '!',
+  'Hey! ' + PLACEHOLDER + '! Don\'t let this letter pass you by!',
+  'Beep beep, this letter is headed straight for ' + PLACEHOLDER,
+  'Nbd but ' + PLACEHOLDER + ' you\'ll be getting something really cool in the mail soon',
+  'Yooooo I just peeked at this letter for ' + PLACEHOLDER + ' and they\'re totally gonna love it',
+  PLACEHOLDER + '? Apparently someone has sent you a letter.',
+  'A letter for ' + PLACEHOLDER + '? Reminds me, I think I went to postman academy with a ' + PLACEHOLDER,
+  'Good lord, AMAZING letter on it\'s way to ' + PLACEHOLDER + ' rn',
+  'I wish it wasn\'t against the rules, I would totally share a peek at this letter to ' + PLACEHOLDER + ' with you guys',
+  PLACEHOLDER + ' go look at your mailbox! Haha it\'s probably not there... unless...?',
+  'Ppl really out there still sending letters? Apparently this one is for ' + PLACEHOLDER,
+  'Yessssss letter on the way to ' + PLACEHOLDER,
+  'Dear ' + PLACEHOLDER + ', start checking ur mail',
+  'Yo ' + PLACEHOLDER + ', u best check yo mailbox dawg',
+  'Psssst ' + PLACEHOLDER + ' you got mail',
+  PLACEHOLDER + ' put ur right hand in put ur right hand out, put ur right hand in the mailbox and pull this letter out'
+];
+
 const client = new Discord.Client();
 
 client.once('ready', () => {
@@ -165,7 +192,7 @@ function viewAssignee(args: string, fullResponse: Message) {
         viewAssigneeHelper(guild_id, fullResponse);
     } else {
         UserTable.get(`user#${fullResponse.author.id}`, author_item => {
-            if (author_item !== null && author_item['server'] !== 'multiple') {
+            if (author_item !== null && author_item['server'] !== 'multiple' && author_item['server'] !== 'none') {
                 viewAssigneeHelper(author_item['server'], fullResponse);
             } else {
                 sendMessage(fullResponse.channel, '', 'You\'re in multiple postman servers. Make sure your command follows \'postman!viewassignee <server id>\'');
@@ -174,18 +201,127 @@ function viewAssignee(args: string, fullResponse: Message) {
     }
 }
 
-function sendMailHelper(gulid_id: string, fullResponse: Message) {
-
+function sendMailHelper(user_id: string, guild_id: string, fullResponse:Message) {
+    GuildTable.get(`guild#${guild_id}`, guild_item => {
+        if (guild_item === null) {
+            handleError(fullResponse.channel, `Unable to find guild ${guild_id} in sendMail`);
+        } else {
+            client.guilds.fetch({ guild_id, force: true }).then((res: Guild) => {
+                // @ts-ignore. Casting GuildChannel to TextChannel bc no one will use voice channel unless they want to kill the postman.
+                const channel: TextChannel = res.channels.resolve(guild_item['group_channel']);
+                if(channel === null) {
+                    sendMessage(fullResponse.channel, '', 'Wasn\'t able to find that channel');
+                } else {
+                    const mention = '<@' + user_id + '>'
+                    const phrase = PHRASES[Math.floor(Math.random() * PHRASES.length)];
+                    const message = phrase.split(PLACEHOLDER).join(mention);
+                    sendMessage(channel, 'Incoming letter', message);
+                    sendMessage(fullResponse.channel, 'Updated successfully', 'Announcement has been sent');
+                }
+            }).catch(() => handleError(fullResponse.channel, 'Wasn\'t able to find that server'));
+        }
+    });
 }
 function sendMail(args: string, fullResponse: Message) {
-
+    const argArray = args.split(' ').filter((s) => s.match(/^([0-9]+)$/) !== null);
+    if (argArray.length === 2) {
+        const new_user_id = argArray[0];
+        const guild_id = argArray[1];
+        sendMailHelper(new_user_id, guild_id, fullResponse);
+    } else if (argArray.length === 1) {
+        UserTable.get(`user#${fullResponse.author.id}`, author_item => {
+            if (author_item !== null && author_item['server'] !== 'multiple' && author_item['server'] !== 'none') {
+                const new_user_id = argArray[0];
+                sendMailHelper(new_user_id, author_item['server'], fullResponse);
+            } else {
+                const guild_id = argArray[0];
+                HistoryTable.get(`history#${guild_id}#current`, history_item => {
+                    if (history_item === null || !history_item['matches'][fullResponse.author.id]) {
+                        sendMessage(fullResponse.channel, '', 'You\'re in multiple postman servers. Make sure your command follows \'postman!sendMail <user id> <server id>\'');
+                    } else {
+                        const new_user_id = history_item['matches'][fullResponse.author.id]['recipient'];
+                        sendMailHelper(new_user_id, guild_id, fullResponse);
+                    }
+                });
+            }
+        });
+    } else {
+        UserTable.get(`user#${fullResponse.author.id}`, author_item => {
+            if (author_item !== null && author_item['server'] !== 'multiple' && author_item['server'] !== 'none') {
+                HistoryTable.get(`history#${author_item['server']}#current`, history_item => {
+                    if (history_item === null || !history_item['matches'][fullResponse.author.id]) {
+                        sendMessage(fullResponse.channel, '', 'You\'re in multiple postman servers. Make sure your command follows \'postman!sendMail <user id> <server id>\'');
+                    } else {
+                        const new_user_id = history_item['matches'][fullResponse.author.id]['recipient'];
+                        const guild_id = author_item['server'];
+                        sendMailHelper(new_user_id, guild_id, fullResponse);
+                    }
+                });
+            } else {
+                sendMessage(fullResponse.channel, '', 'You\'re in multiple postman servers. Make sure your command follows \'postman!sendMail <server id>\'');
+            }
+        });
+    }
 }
 
-function undoSendMailHelper(gulid_id: string, fullResponse: Message) {
-    
+function undoSendMailHelper(user_id: string, guild_id: string, fullResponse: Message) {
+    GuildTable.get(`guild#${guild_id}`, guild_item => {
+        if (guild_item === null) {
+            handleError(fullResponse.channel, `Unable to find guild ${guild_id} in undoSendMail`);
+        } else {
+            client.guilds.fetch({ guild_id, force: true }).then((res: Guild) => {
+                // @ts-ignore. Casting GuildChannel to TextChannel bc no one will use voice channel unless they want to kill the postman.
+                const channel: TextChannel = res.channels.resolve(guild_item['group_channel']);
+                if(channel === null) {
+                    sendMessage(fullResponse.channel, '', 'Wasn\'t able to find that channel');
+                } else {
+                    sendMessage(fullResponse.channel, 'Updated successfully', 'Announcement has been revoked');
+                    sendMessage(channel, 'Oops', `Sorry, <@${user_id}>, that last message was a mistake...`);
+                }
+            }).catch(() => handleError(fullResponse.channel, 'Wasn\'t able to find that server'));
+        }
+    });
 }
 function undoSendMail(args: string, fullResponse: Message) {
-
+    const argArray = args.split(' ').filter((s) => s.match(/^([0-9]+)$/) !== null);
+    if (argArray.length === 2) {
+        const new_user_id = argArray[0];
+        const guild_id = argArray[1];
+        undoSendMailHelper(new_user_id, guild_id, fullResponse);
+    } else if (argArray.length === 1) {
+        UserTable.get(`user#${fullResponse.author.id}`, author_item => {
+            if (author_item !== null && author_item['server'] !== 'multiple' && author_item['server'] !== 'none') {
+                const new_user_id = argArray[0];
+                undoSendMailHelper(new_user_id, author_item['server'], fullResponse);
+            } else {
+                const guild_id = argArray[0];
+                HistoryTable.get(`history#${guild_id}#current`, history_item => {
+                    if (history_item === null || !history_item['matches'][fullResponse.author.id]) {
+                        sendMessage(fullResponse.channel, '', 'You\'re in multiple postman servers. Make sure your command follows \'postman!undosendMail <user id> <server id>\'');
+                    } else {
+                        const new_user_id = history_item['matches'][fullResponse.author.id]['recipient'];
+                        undoSendMailHelper(new_user_id, guild_id, fullResponse);
+                    }
+                });
+            }
+        });
+    } else {
+        UserTable.get(`user#${fullResponse.author.id}`, author_item => {
+            if (author_item !== null && author_item['server'] !== 'multiple' && author_item['server'] !== 'none') {
+                HistoryTable.get(`history#${author_item['server']}#current`, history_item => {
+                    if (history_item === null || !history_item['matches'][fullResponse.author.id]) {
+                        sendMessage(fullResponse.channel, '', 'You\'re in multiple postman servers. Make sure your command follows \'postman!undosendMail <user id> <server id>\'');
+                    } else {
+                        const new_user_id = history_item['matches'][fullResponse.author.id]['recipient'];
+                        const guild_id = author_item['server'];
+                        undoSendMailHelper(new_user_id, guild_id, fullResponse);
+                    }
+                });
+            } else {
+                sendMessage(fullResponse.channel, '', 'You\'re in multiple postman servers. Make sure your command follows \'postman!undosendMail <server id>\'');
+            }
+        });
+    }
 }
 
 function joinServer(args: string, fullResponse: Message) {
@@ -315,7 +451,7 @@ function listUsers(args: string, fullResponse: Message) {
         listUsersHelper(guild_id, fullResponse);
     } else {
         UserTable.get(`user#${fullResponse.author.id}`, author_item => {
-            if (author_item !== null && author_item['server'] !== 'multiple') {
+            if (author_item !== null && author_item['server'] !== 'multiple' && author_item['server'] !== 'none') {
                 listUsersHelper(author_item['server'], fullResponse);
             } else {
                 sendMessage(fullResponse.channel, '', 'You\'re in multiple postman servers. Make sure your command follows \'postman!listusers <server id>\'');
@@ -445,7 +581,7 @@ function startNewRound(args: string, fullResponse: Message) {
         startNewRoundHelper(guild_id, fullResponse);
     } else {
         UserTable.get(`user#${fullResponse.author.id}`, author_item => {
-            if (author_item !== null && author_item['server'] !== 'multiple') {
+            if (author_item !== null && author_item['server'] !== 'multiple' && author_item['server'] !== 'none') {
                 startNewRoundHelper(author_item['server'], fullResponse);
             } else {
                 sendMessage(fullResponse.channel, '', 'You\'re in multiple postman servers. Make sure your command follows \'postman!startnewround <server id>\'');
@@ -486,7 +622,7 @@ function authorize(args: string, fullResponse: Message) {
     } else if (argArray.length === 1) {
         const new_user_id = argArray[0];
         UserTable.get(`user#${fullResponse.author.id}`, author_item => {
-            if (author_item !== null && author_item['server'] !== 'multiple') {
+            if (author_item !== null && author_item['server'] !== 'multiple' && author_item['server'] !== 'none') {
                 authorizeHelper(new_user_id, author_item['server'], fullResponse);
             } else {
                 sendMessage(fullResponse.channel, '', 'You\'re in multiple postman servers. Make sure your command follows \'postman!authorize <user id> <server id>\'');
@@ -529,7 +665,7 @@ function unauthorize(args: string, fullResponse: Message) {
     } else if (argArray.length === 1) {
         const new_user_id = argArray[0];
         UserTable.get(`user#${fullResponse.author.id}`, author_item => {
-            if (author_item !== null && author_item['server'] !== 'multiple') {
+            if (author_item !== null && author_item['server'] !== 'multiple' && author_item['server'] !== 'none') {
                 unauthorizeHelper(new_user_id, author_item['server'], fullResponse);
             } else {
                 sendMessage(fullResponse.channel, '', 'You\'re in multiple postman servers. Make sure your command follows \'postman!unauthorize <user id> <server id>\'');
@@ -572,7 +708,7 @@ function changeChannel(args: string, fullResponse: Message) {
     } else if (argArray.length === 1) {
         const channel_id = argArray[0];
         UserTable.get(`user#${fullResponse.author.id}`, author_item => {
-            if (author_item !== null && author_item['server'] !== 'multiple') {
+            if (author_item !== null && author_item['server'] !== 'multiple' && author_item['server'] !== 'none') {
                 changeChannelHelper(channel_id, author_item['server'], fullResponse);
             } else {
                 sendMessage(fullResponse.channel, '', 'You\'re in multiple postman servers. Make sure your command follows \'postman!changechannel <channel id> <server id>\'');
@@ -653,6 +789,7 @@ function initUser(user: User, callback: () => void) {
         discord_id: user.id,
         username: user.username,
         discriminator: user.discriminator,
+        server: 'none',
         address: {
             line1: '',
             line2: '',
