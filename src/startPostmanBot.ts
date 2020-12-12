@@ -1,4 +1,4 @@
-import { DMChannel, Guild, GuildChannel, GuildMember, Message, NewsChannel, TextChannel, User } from "discord.js";
+import { DMChannel, Guild, GuildMember, Message, NewsChannel, TextChannel, User } from "discord.js";
 import { GuildItem } from "dynamodb";
 import { UserTable, GuildTable, MetadataTable, HistoryTable } from "./tables";
 
@@ -14,7 +14,7 @@ dynamo.AWS.config.loadFromPath('./credentials.json');
  * Shuffles array in place. ES6 version
  * @param {Array} a items An array containing the items.
  */
-function shuffle(a) {
+function shuffle(a: any[]) {
     for (let i = a.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [a[i], a[j]] = [a[j], a[i]];
@@ -463,6 +463,7 @@ function listUsers(args: string, fullResponse: Message) {
 function getPairing(n: number, previous: number[], fullResponse: Message) {
     if (n <= 2) {
         handleError(fullResponse.channel, 'Too small of group. Only ${n}');
+        return null;
     } else {
         const recipients = [...Array(n).keys()];
 
@@ -501,69 +502,75 @@ function startNewRoundHelper(guild_id: string, fullResponse: Message) {
                                     }
                                 }
                                 const pairing = getPairing(active_users.length, previous, fullResponse);
-                                const matches: { [key: string]: { recipient: string; sent: string; } } = {};
-                                for (let i = 0; i < active_users.length; ++i) {
-                                    matches[active_users[i]] = {
-                                        'recipient': active_users[pairing[i]],
-                                        'sent': 'false',
-                                    };
-                                }
-                                const date = new Date().toISOString();
-                                const round_num = parseInt(guild_item['history_length']) + 1;
-                                GuildTable.update({
-                                    'key': `guild#${guild_id}`,
-                                    'history_length': round_num.toString(),
-                                })
-                                HistoryTable.update({
-                                    'key': `history#${guild_id}#current`,
-                                    'guild': guild_id,
-                                    'round_id': round_num.toString(),
-                                    'date': date,
-                                    'matches': matches,
-                                })
-                                HistoryTable.update({
-                                    'key': `history#${guild_id}#${round_num.toString()}`,
-                                    'guild': guild_id,
-                                    'round_id': round_num.toString(),
-                                    'date': date,
-                                    'matches': matches,
-                                })
-                                for (const user_id of active_users) {
-                                    UserTable.get(`user#${user_id}`, user_item => {
-                                        if (user_item === null) {
-                                            handleError(fullResponse.channel, `not able to find user ${user_id} when starting round`);
-                                        } else {
-                                            guild.members.fetch({ user: user_id, force: true }).then((member: GuildMember) => {
-                                                let name: string;
-                                                if (member.nickname === null) {
-                                                    name = `${member.user.username}#${member.user.discriminator}`;
+                                if (pairing !== null) {
+                                    const matches: { [key: string]: { recipient: string; sent: string; } } = {};
+                                    for (let i = 0; i < active_users.length; ++i) {
+                                        matches[active_users[i]] = {
+                                            'recipient': active_users[pairing[i]],
+                                            'sent': 'false',
+                                        };
+                                    }
+                                    const date = new Date().toISOString();
+                                    const round_num = parseInt(guild_item['history_length']) + 1;
+                                    GuildTable.update({
+                                        'key': `guild#${guild_id}`,
+                                        'history_length': round_num.toString(),
+                                    })
+                                    HistoryTable.update({
+                                        'key': `history#${guild_id}#current`,
+                                        'guild': guild_id,
+                                        'round_id': round_num.toString(),
+                                        'date': date,
+                                        'matches': matches,
+                                    })
+                                    HistoryTable.update({
+                                        'key': `history#${guild_id}#${round_num.toString()}`,
+                                        'guild': guild_id,
+                                        'round_id': round_num.toString(),
+                                        'date': date,
+                                        'matches': matches,
+                                    })
+                                    for (const user_id of active_users) {
+                                        UserTable.get(`user#${user_id}`, user_item => {
+                                            if (user_item === null) {
+                                                handleError(fullResponse.channel, `not able to find user ${user_id} when starting round`);
+                                            } else {
+                                                const member = guild.member(user_id);
+                                                if (member === null) {
+                                                    handleError(fullResponse.channel, `Something went wrong when looking for user ${user_id} in guild ${guild_id}`)
                                                 } else {
-                                                    name = member.nickname;
+                                                    let name: string;
+                                                    if (member.nickname === null) {
+                                                        name = `${member.user.username}#${member.user.discriminator}`;
+                                                    } else {
+                                                        name = member.nickname;
+                                                    }
+                                                        sendMessage(
+                                                            member,
+                                                            `Shhhh, don't tell anyone!`,
+                                                            [
+                                                                `@${name}`,
+                                                                '',
+                                                                user_item['address']['line1'],
+                                                                user_item['address']['line2'],
+                                                                user_item['address']['line3'],
+                                                                user_item['address']['line4'],
+                                                            ].join('\n'),
+                                                        );
                                                 }
-                                                sendMessage(
-                                                    guild.member(user_id),
-                                                    `Shhhh, don't tell anyone!`,
-                                                    [
-                                                        `@${name}`,
-                                                        '',
-                                                        user_item['address']['line1'],
-                                                        user_item['address']['line2'],
-                                                        user_item['address']['line3'],
-                                                        user_item['address']['line4'],
-                                                    ].join('\n'),
-                                                );
-                                            }).catch(() => handleError(fullResponse.channel, `Something went wrong when looking for user ${user_id} in guild ${guild_id}`));
-                                        }
-                                    });
+                                            }
+                                        });
+                                    }
+                                    sendMessage(
+                                        channel,
+                                        `Postcard Somebody Round ${round_num + 1} has begun!`,
+                                        [
+                                            `I've just sent you a DM with your assigned person's address. Keep it secret and have some fun!`,
+                                            '',
+                                            'If you did not get a message, post here or let Michael know ASAP',
+                                        ].join('\n')
+                                    );
                                 }
-                                sendMessage(
-                                    channel,
-                                    `Postcard Somebody Round ${round_num + 1} has begun!`,
-                                    [
-                                        `I've just sent you a DM with your assigned person's address. Keep it secret and have some fun!`,
-                                        '',
-                                        'If you did not get a message, post here or let Michael know ASAP',
-                                    ].join('\n'));
                             });
                         }
                     }).catch(() => handleError(fullResponse.channel, 'Wasn\'t able to find that server'));
