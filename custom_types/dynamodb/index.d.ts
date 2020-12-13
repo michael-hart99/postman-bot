@@ -1,6 +1,7 @@
 declare module 'dynamodb' {
     class DynamoDbTable<T extends Item> {
         get(key: string, callback: (err, res) => void);
+        get(key: string): Promise<ItemRes<T>>;
         update(values: Object, callback?: (err, res) => void);
         destroy(key: string, callback?: (err, res) => void);
     }

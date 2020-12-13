@@ -29,7 +29,7 @@ export class PostmanTable<T extends Item> {
     }
     
     public get(key: string, callback: (item: T | null) => void) {
-        this.table.get(key, (err, res) => {
+         this.table.get(key, (err, res) => {
             handleErr(err);
             if (res === null) {
                 callback(null);
@@ -37,6 +37,10 @@ export class PostmanTable<T extends Item> {
                 callback(res['attrs']);
             }
         });
+    }
+
+    public async getAsync(key: string) {
+        return (await this.table.get(key))['attrs'];
     }
 
     public update(values: Object, callback?: () => void) {
