@@ -16,7 +16,9 @@ declare module 'dynamodb' {
         'discord_id': string
         'username': string
         'discriminator': string
-        'server': string
+        'servers': {
+            [key:string]: string,
+        }
         'address': {
             'line1': string,
             'line2': string,
