@@ -536,16 +536,14 @@ function getPairing(n: number, previous: number[], fullResponse: Message) {
 async function checkAddresses(users: string[], fullResponse: Message) {
     let address_missing = false;
     for (const user_id of users) {
-        UserTable.get(`user#${user_id}`, user_item => {
-            if (user_item === null) {
-                handleError(fullResponse.channel, `not able to find user ${user_id} when starting round`);
-            } else {
-                if (user_item['address']['line1'] === '') {
-                    address_missing = true;
-                    sendMessage(fullResponse.channel, '', `${user_item['username']}#${user_item['discriminator']} does not have their address set`);
-                }
-            }
-        });
+        const user_item = await UserTable.getAsync(`user#${user_id}`);
+        if (user_item === null) {
+            address_missing = true;
+            handleError(fullResponse.channel, `not able to find user ${user_id} when starting round`);
+        } else if (user_item['address']['line1'] === '') {
+            address_missing = true;
+            sendMessage(fullResponse.channel, '', `${user_item['username']}#${user_item['discriminator']} does not have their address set`);
+        }
     }
     return address_missing;
 }
@@ -606,34 +604,34 @@ function startNewRoundHelper(guild_id: string, fullResponse: Message) {
                                                 'matches': matches,
                                             });
                                             for (let i = 0; i < active_users.length; ++i) {
-                                                        UserTable.get(`user#${active_users[pairing[i]]}`, to_user_item => {
-                                                            if (to_user_item === null) {
-                                                                handleError(fullResponse.channel, `not able to find user ${active_users[pairing[i]]} when starting round`);
+                                                UserTable.get(`user#${active_users[pairing[i]]}`, to_user_item => {
+                                                    if (to_user_item === null) {
+                                                        handleError(fullResponse.channel, `not able to find user ${active_users[pairing[i]]} when starting round`);
+                                                    } else {
+                                                        const from_member = guild.member(active_users[i]);
+                                                        const to_member = guild.member(to_user_item['discord_id']);
+                                                        if (from_member === null || to_member === null) {
+                                                            handleError(fullResponse.channel, `Something went wrong when looking for user ${active_users[i]} or ${to_user_item['discord_id']} in guild ${guild_id}`);
+                                                        } else {
+                                                            let name: string;
+                                                            if (to_member.nickname === null) {
+                                                                name = `${to_member.user.username}#${to_member.user.discriminator}`;
                                                             } else {
-                                                                const from_member = guild.member(active_users[i]);
-                                                                const to_member = guild.member(to_user_item['discord_id']);
-                                                                if (from_member === null || to_member === null) {
-                                                                    handleError(fullResponse.channel, `Something went wrong when looking for user ${active_users[i]} or ${to_user_item['discord_id']} in guild ${guild_id}`);
-                                                                } else {
-                                                                    let name: string;
-                                                                    if (to_member.nickname === null) {
-                                                                        name = `${to_member.user.username}#${to_member.user.discriminator}`;
-                                                                    } else {
-                                                                        name = to_member.nickname;
-                                                                    }
-                                                                    sendMessage(
-                                                                        from_member,
-                                                                        `Shhhh, don't tell anyone!`,
-                                                                        [
-                                                                            `@${name}`,
-                                                                            '',
-                                                                            to_user_item['address']['line1'],
-                                                                            to_user_item['address']['line2'],
-                                                                            to_user_item['address']['line3'],
-                                                                            to_user_item['address']['line4'],
-                                                                        ].join('\n'),
-                                                                    );
-                                                                }
+                                                                name = to_member.nickname;
+                                                            }
+                                                            sendMessage(
+                                                                from_member,
+                                                                `Shhhh, don't tell anyone!`,
+                                                                [
+                                                                    `@${name}`,
+                                                                    '',
+                                                                    to_user_item['address']['line1'],
+                                                                    to_user_item['address']['line2'],
+                                                                    to_user_item['address']['line3'],
+                                                                    to_user_item['address']['line4'],
+                                                                ].join('\n'),
+                                                            );
+                                                        }
                                                     }
                                                 });
                                             }
