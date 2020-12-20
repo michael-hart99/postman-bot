@@ -64,10 +64,50 @@ client.once('ready', () => {
 
 class CommandTemplate {
     constructor(
+        public name: string,
         public fn: (arg: string, fullResponse: Message) => void,
         public desc: string,
         public hidden: boolean,
     ) { }
+}
+
+class CommandList {
+    private cmdMap = new Map<string, CommandTemplate>();
+
+    constructor(
+        private description: string
+    ) {
+        this.addCmd('help', this.help, 'Displays list of available commands.', false);
+    }
+
+    addCmd = (
+        name: string,
+        fn: (arg: string, fullResponse: Message) => void,
+        desc: string,
+        hidden: boolean,
+    ) => {
+        this.cmdMap.set(name.toLowerCase(), new CommandTemplate(name, fn, desc, hidden));
+    }
+
+    getCmdNames = () => {
+        return this.cmdMap.keys();
+    }
+
+    getCmd = (name: string) => {
+        return this.cmdMap.get(name.toLowerCase());
+    }
+
+    private help = (args: string, fullResponse: Message) => {
+        const msg = [];
+        for (const cmd of this.cmdMap.values()) {
+            if (!cmd.hidden || args === 'showall') {
+                msg.push(`postman!**${cmd.name}** - ${cmd.desc}`);
+            }
+        }
+        msg.push('');
+        msg.push(this.description);
+        sendMessage(fullResponse.channel, 'Available commands:', msg.join('\n'));
+    }
 }
 
 function handleError(channel: TextChannel | NewsChannel | DMChannel, err: string) {
@@ -89,23 +129,6 @@ function info(_: string, fullResponse: Message) {
     });
 }
 //*/
-
-function help(cmdMap: Map<string, CommandTemplate>) {
-    return (args: string, fullResponse: Message) => {
-        const msg = [];
-        for (const name of cmdMap.keys()) {
-            const cmd = cmdMap.get(name);
-            if (cmd === undefined) {
-                handleError(fullResponse.channel, `"${cmd} not found in command map`)
-            } else {
-                if (!cmd.hidden || args === 'showall') {
-                    msg.push(`postman!**${name}** - ${cmd.desc}`);
-                }
-            }
-        }
-        sendMessage(fullResponse.channel, 'Available commands:', msg.join('\n'));
-    }
-}
 
 function viewAddress(_: string, fullResponse: Message) {
     UserTable.get(`user#${fullResponse.author.id}`, (item) => {
@@ -137,9 +160,19 @@ function setAddress(args: string, fullResponse: Message) {
     function formatAddress(s: string) {
         return s.trim().toUpperCase();
     }
-    let lines = args.split('\n');
+    let lines = args.split(';').map(s => s.trim()).filter(s => s !== '');
     if (lines.length !== 4) {
-        sendMessage(fullResponse.channel, '', `Make sure your command is as follows: \n\`postman!setaddress\njoey schmoey\n333 dovetail lane nw\ncity, state zipcode\ncountry\``);
+        sendMessage(
+            fullResponse.channel,
+            '',
+            [
+                'Make sure your command is as follows:',
+                '\`postman!setaddress',
+                'joey schmoey;',
+                '333 dovetail lane nw;',
+                'city, state zipcode;',
+                'country\`'
+            ].join('\n'));
     } else {
         lines = lines.map(formatAddress);
         UserTable.update({
@@ -810,28 +843,27 @@ function cmdNotFound(cmd: string, fullResponse: Message) {
     sendMessage(fullResponse.channel, '', 'I don\'t know how to do "' + cmd + '".');
 }
 
-const channelCommands = new Map<string, CommandTemplate>();
-const dmCommands = new Map<string, CommandTemplate>();
+const channelCommands = new CommandList('These are the commands available in this channel. More are available if you talk to me in a DM.');
+const dmCommands = new CommandList('These are the commands available via DM.');
+
 //dmCommands.set('test', new CommandTemplate(test, 'A test command.', true));
 //dmCommands.set('info', new CommandTemplate(info, 'View your user info.', true));
-dmCommands.set('help', new CommandTemplate(help(dmCommands), 'Displays list of available commands.', false));
-dmCommands.set('viewaddress', new CommandTemplate(viewAddress, 'View your saved address.', false));
-dmCommands.set('setaddress', new CommandTemplate(setAddress, 'Set/change your saved address.', false));
-dmCommands.set('viewAssignee', new CommandTemplate(viewAssignee, 'View your current assignee.', false));
-dmCommands.set('sendmail', new CommandTemplate(sendMail, 'Sends an announcement for your assignee to check their mail.', false));
-dmCommands.set('undosendmail', new CommandTemplate(undoSendMail, 'Sends an announcement for your assignee indicating the last message was a mistake.', false));
-dmCommands.set('joinserver', new CommandTemplate(joinServer, 'Join a server\'s postcard list.', false));
-dmCommands.set('leaveserver', new CommandTemplate(leaveServer, 'Leave a server\'s postcard list.', false));
-dmCommands.set('deletealldata', new CommandTemplate(deleteAllData, 'Delete all stored data about you.', false));
-dmCommands.set('listusers', new CommandTemplate(listUsers, 'Lists all active users who have joined in a given channel.', true));
-dmCommands.set('startnewround', new CommandTemplate(startNewRound, 'Starts a new postcard round, assigning everyone a recipient.', true));
-dmCommands.set('authorize', new CommandTemplate(authorize, 'Give someone admin postcard privileges in a server.', true));
-dmCommands.set('unauthorize', new CommandTemplate(unauthorize, 'Remove someone\'s admin postcard privileges in a server.', true));
-dmCommands.set('changechannel', new CommandTemplate(changeChannel, 'Changes the channel where postcard announcements are sent.', true));
+dmCommands.addCmd('viewAddress', viewAddress, 'View your saved address.', false);
+dmCommands.addCmd('setAddress', setAddress, 'Set/change your saved address.', false);
+dmCommands.addCmd('viewAssignee', viewAssignee, 'View your current assignee.', false);
+dmCommands.addCmd('sendMail', sendMail, 'Sends an announcement for your assignee to check their mail.', false);
+dmCommands.addCmd('undoSendMail', undoSendMail, 'Sends an announcement for your assignee indicating the last message was a mistake.', false);
+dmCommands.addCmd('joinServer', joinServer, 'Join a server\'s postcard list.', false);
+dmCommands.addCmd('leaveServer', leaveServer, 'Leave a server\'s postcard list.', false);
+dmCommands.addCmd('deleteAllData', deleteAllData, 'Delete all stored data about you.', false);
+dmCommands.addCmd('listUsers', listUsers, 'Lists all active users who have joined in a given channel.', true);
+dmCommands.addCmd('startNewRound', startNewRound, 'Starts a new postcard round, assigning everyone a recipient.', true);
+dmCommands.addCmd('authorize', authorize, 'Give someone admin postcard privileges in a server.', true);
+dmCommands.addCmd('unauthorize', unauthorize, 'Remove someone\'s admin postcard privileges in a server.', true);
+dmCommands.addCmd('changeChannel', changeChannel, 'Changes the channel where postcard announcements are sent.', true);
 
-channelCommands.set('help', new CommandTemplate(help(channelCommands), 'Displays list of available commands.', false));
-channelCommands.set('joinserver', new CommandTemplate(joinServer, 'Join a server\'s postcard list.', false));
-channelCommands.set('leaveserver', new CommandTemplate(leaveServer, 'Leave a server\'s postcard list.', false));
+channelCommands.addCmd('joinServer', joinServer, 'Join a server\'s postcard list.', false);
+channelCommands.addCmd('leaveServer', leaveServer, 'Leave a server\'s postcard list.', false);
 
 function sendMessage(channel: TextChannel | NewsChannel | DMChannel | User | GuildMember, title: string, content: string) {
     channel.send({
@@ -904,7 +936,7 @@ function handleCommand(cmd: Command, fullResponse: Message) {
             if (guild_item === null) {
                 handleError(fullResponse.channel, `problem getting guild info for ${guild_id}`);
             } else if (guild_item['group_channel'] === fullResponse.channel.id) {
-                const matchingCmd = channelCommands.get(cmd.command);
+                const matchingCmd = channelCommands.getCmd(cmd.command);
                 if (matchingCmd === undefined) {
                     cmdNotFound(cmd.command, fullResponse);
                 } else {
@@ -914,7 +946,7 @@ function handleCommand(cmd: Command, fullResponse: Message) {
         });
     } else {
         // if in dm...
-        const matchingCmd = dmCommands.get(cmd.command);
+        const matchingCmd = dmCommands.getCmd(cmd.command);
         if (matchingCmd === undefined) {
             cmdNotFound(cmd.command, fullResponse);
         } else {
@@ -943,7 +975,8 @@ async function cacheDiscordData(guilds: string[]) {
 // message sent by user
 client.on('message', (msg: Message) => {
     if (!msg.author.bot && msg.webhookID === null) {
-        const cmd = new Command(msg.content.toLowerCase());
+        const cleanedMsg = msg.content.toLowerCase().split('\n').join(' ');
+        const cmd = new Command(cleanedMsg);
         if (cmd.isValid()) {
             UserTable.get(`user#${msg.author.id}`, (user_item) => {
                 if (user_item === null) {
@@ -1025,7 +1058,7 @@ client.on("guildCreate", (guild: Guild) => {
         }
     });
     console.log("Joined a new guild: " + guild.name);
-})
+});
 
 //removed from a server
 client.on("guildDelete", (guild: Guild) => {
@@ -1064,6 +1097,6 @@ client.on("guildDelete", (guild: Guild) => {
         }
     });
     console.log("Left a guild: " + guild.name);
-})
+});
 
 client.login(TOKEN);
