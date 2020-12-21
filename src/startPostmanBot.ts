@@ -22,6 +22,17 @@ function shuffle(a: any[]) {
 }
 
 const PLACEHOLDER = '{}';
+const THANK_YOUS = [
+    'No problemo',
+    'U r welcome',
+    'Yo dw I gotchu',
+    'You\'re welcome homie!',
+    'Welc\'m',
+    '*tips hat*',
+    'Anytime, anywhere, for u ;)',
+    'Np dude, np',
+    '<3',
+];
 const PHRASES = [
   PLACEHOLDER + ' has a letter on the way!',
   PLACEHOLDER + ' should keep an eye on their mailbox...',
@@ -97,16 +108,33 @@ class CommandList {
         return this.cmdMap.get(name.toLowerCase());
     }
 
-    private help = (args: string, fullResponse: Message) => {
-        const msg = [];
-        for (const cmd of this.cmdMap.values()) {
-            if (!cmd.hidden || args === 'showall') {
-                msg.push(`postman!**${cmd.name}** - ${cmd.desc}`);
+    private help = async (_: string, fullResponse: Message) => {
+        const userItem = await UserTable.getAsync(`user#${fullResponse.author.id}`);
+        if (userItem === null) {
+            handleError(fullResponse.channel, `Couldn't find user ${fullResponse.author.id}`);
+        } else {
+            const msg = [];
+            let authorized = false;
+            for (const guildId of Object.keys(userItem['servers'])) {
+                const guildItem = await GuildTable.getAsync(`guild#${guildId}`);
+                if (guildItem === null) {
+                    handleError(fullResponse.channel, `couldn't find guild ${guildId}`);
+                } else {
+                    if (guildItem['authorized_users'][fullResponse.author.id]) {
+                        authorized = true;
+                        break;
+                    }
+                }
             }
+            for (const cmd of this.cmdMap.values()) {
+                if (!cmd.hidden || authorized) {
+                    msg.push(`postman!**${cmd.name}** - ${cmd.desc}`);
+                }
+            }
+            msg.push('');
+            msg.push(this.description);
+            sendMessage(fullResponse.channel, 'Available commands:', msg.join('\n'));
         }
-        msg.push('');
-        msg.push(this.description);
-        sendMessage(fullResponse.channel, 'Available commands:', msg.join('\n'));
     }
 }
 
@@ -504,6 +532,11 @@ function deleteAllData(_: string, fullResponse: Message) {
     sendMessage(fullResponse.channel, 'Success', 'Your information has been deleted');
 }
 
+function thankYou(_: string, fullResponse: Message) {
+    const phrase = THANK_YOUS[Math.floor(Math.random() * THANK_YOUS.length)];
+    sendMessage(fullResponse.channel, '', phrase);
+}
+
 function listUsersHelper(guild_id: string, fullResponse: Message) {
     GuildTable.get(`guild#${guild_id}`, item => {
         if (item === null) {
@@ -839,6 +872,50 @@ function changeChannel(args: string, fullResponse: Message) {
     }
 }
 
+function sendIntroductionHelper(guild_id: string, fullResponse: Message) {
+    GuildTable.get(`guild#${guild_id}`, item => {
+        if (item === null) {
+            sendMessage(fullResponse.channel, '', `I couldn\'t find a matching server with ID ${guild_id}, double-check that the second number is the server ID`);
+        } else {
+            if (item['authorized_users'][fullResponse.author.id]) {
+                const channel_id = item['group_channel'];
+                if (!channel_id) {
+                    sendMessage(fullResponse.channel, '', 'Looks like the server channel hasn\'t been set. Set it with `postman!changeChannel <channel id>`');
+                } else {
+                    client.guilds.fetch(guild_id).then((res: Guild) => {
+                        // @ts-ignore. Casting GuildChannel to TextChannel bc no one will use voice channel unless they want to kill the postman.
+                        const channel : TextChannel = res.channels.resolve(channel_id);
+                        if(channel === null) {
+                            handleError(fullResponse.channel, `Wasn\'t able to find channel ${channel_id}`);
+                        } else {
+                            sendMessage(channel, 'Hello!', INTRO_CHANNEL_MESSAGE);
+                            sendMessage(fullResponse.channel, 'Success', 'Sent introduction message to the postman channel');
+                        }
+                    }).catch((e: any) => handleError(fullResponse.channel, `Wasn\'t able to find that server\n${e}`));
+                }
+            } else {
+                sendMessage(fullResponse.channel, '', 'You aren\'t authorized to do this');
+            }
+        }
+    });
+}
+function sendIntroduction(args: string, fullResponse: Message) {
+    const argArray = args.split(' ').filter((s) => s.match(/^([0-9]+)$/) !== null);
+    if (argArray.length === 1) {
+        const guild_id = argArray[0];
+        sendIntroductionHelper(guild_id, fullResponse);
+    } else {
+        UserTable.get(`user#${fullResponse.author.id}`, author_item => {
+            if (author_item !== null && Object.keys(author_item['servers']).length === 1) {
+                const guild_id = Object.keys(author_item['servers'])[0];
+                sendIntroductionHelper(guild_id, fullResponse);
+            } else {
+                sendMessage(fullResponse.channel, '', 'You\'re in multiple postman servers. Make sure your command follows \'postman!sendIntroduction <server id>\'');
+            }
+        });
+    }
+}
+
 function cmdNotFound(cmd: string, fullResponse: Message) {
     sendMessage(fullResponse.channel, '', 'I don\'t know how to do "' + cmd + '".');
 }
@@ -856,14 +933,17 @@ dmCommands.addCmd('undoSendMail', undoSendMail, 'Sends an announcement for your 
 dmCommands.addCmd('joinServer', joinServer, 'Join a server\'s postcard list.', false);
 dmCommands.addCmd('leaveServer', leaveServer, 'Leave a server\'s postcard list.', false);
 dmCommands.addCmd('deleteAllData', deleteAllData, 'Delete all stored data about you.', false);
+dmCommands.addCmd('thankYou', thankYou, 'Thank the postman.', false);
 dmCommands.addCmd('listUsers', listUsers, 'Lists all active users who have joined in a given channel.', true);
 dmCommands.addCmd('startNewRound', startNewRound, 'Starts a new postcard round, assigning everyone a recipient.', true);
 dmCommands.addCmd('authorize', authorize, 'Give someone admin postcard privileges in a server.', true);
 dmCommands.addCmd('unauthorize', unauthorize, 'Remove someone\'s admin postcard privileges in a server.', true);
 dmCommands.addCmd('changeChannel', changeChannel, 'Changes the channel where postcard announcements are sent.', true);
+dmCommands.addCmd('sendIntroduction', sendIntroduction, 'Sends a channel announcement introducing how to use the Postman.', true);
 
 channelCommands.addCmd('joinServer', joinServer, 'Join a server\'s postcard list.', false);
 channelCommands.addCmd('leaveServer', leaveServer, 'Leave a server\'s postcard list.', false);
+channelCommands.addCmd('thankYou', thankYou, 'Thank the postman.', false);
 
 function sendMessage(channel: TextChannel | NewsChannel | DMChannel | User | GuildMember, title: string, content: string) {
     channel.send({
@@ -999,18 +1079,24 @@ client.on('message', (msg: Message) => {
     }
 });
 
-const INTRO_MESSAGE = [
+const INTRO_DM_MESSAGE = [
     'You added Postman to a server, and thus you are currently the sole authorized user in that channel.',
     '',
-    'To view all available commands, run `postman!help showall`',
+    'To view all available commands, run `postman!help`',
     '',
     'To start a postcard round',
-    '- have a few users join via `postman!joinserver <server id>`',
-    '- have those users set their addresses via `postman!setaddress`',
-    '- set the postcard announcement channel via `postman!changechannel <channel id>`',
-    '- start the round with `postman!startround`',
+    '- have a few users join via `postman!joinServer <server id>`',
+    '- have those users set their addresses via `postman!setAddress`',
+    '- set the postcard announcement channel via `postman!changeChannel <channel id>`',
+    '- start the round with `postman!startNewRound`',
     '',
     'To authorize another user, run `postman!authorize <user id>`'
+].join('\n');
+
+const INTRO_CHANNEL_MESSAGE = [
+    'I\'m the postman! I can manage everyone\'s address and send people anonymous alerts when they should check their mailbox!',
+    '',
+    'To join the postcard game, send `postman!joinServer` in this channel! Next, send me `postman!setAddress` in a DM. You can DM me `postman!help` to see all available commands',
 ].join('\n');
 
 //joined a server
@@ -1054,7 +1140,7 @@ client.on("guildCreate", (guild: Guild) => {
                 key: 'metadata',
                 active_guilds: active_guilds,
             });
-            sendMessage(first.executor, 'Hello!', INTRO_MESSAGE);
+            sendMessage(first.executor, 'Hello!', INTRO_DM_MESSAGE);
         }
     });
     console.log("Joined a new guild: " + guild.name);
